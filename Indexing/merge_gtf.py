@@ -2,7 +2,7 @@ from dataclasses import dataclass, fields
 from functools import reduce
 import argparse
 
-@dataclass
+@dataclass(frozen=True)
 class GTF_File_Header:
     description: str
     provider: str
@@ -11,16 +11,16 @@ class GTF_File_Header:
     date: str
 
     def __add__(self, other):
-        add_header_attr = lambda file1, file2, att: f"{getattr(file1, att)}; {getattr(file2, att)}"
+        add_header_attr = lambda att: f"{getattr(self, att)}; {getattr(other, att)}"
         return GTF_File_Header(
-            description = add_header_attr(self, other, "description"),
+            description = add_header_attr("description"),
             provider = self.provider,
             contact = self.contact,
             format = self.format,
-            date = add_header_attr(self, other, "date"),
+            date = add_header_attr("date"),
         )
 
-@dataclass
+@dataclass(frozen=True)
 class GTF_File:
     header: GTF_File_Header
     body: list[str]
