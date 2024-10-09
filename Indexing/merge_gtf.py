@@ -31,7 +31,6 @@ class GTF_File:
         return GTF_File(header, body)
 
     def print_to_file(self, filename: str="concatenated.gtf"):
-        """Writes the GTF_File contents to a specified file."""
         with open(filename, 'w') as file:
             for field in fields(self.header):
                 value = getattr(self.header, field.name)
