@@ -11,7 +11,7 @@ class GTF_File_Header:
     date: str
 
     def __add__(self, other):
-        add_header_attr = lambda file1, file2, att: f"{getattr(file1, att)}; {getattr(file1, att)}"
+        add_header_attr = lambda file1, file2, att: f"{getattr(file1, att)}; {getattr(file2, att)}"
         return GTF_File_Header(
             description = add_header_attr(self, other, "description"),
             provider = self.provider,
