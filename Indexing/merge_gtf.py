@@ -30,6 +30,20 @@ class GTF_File:
         body = self.body + other.body
         return GTF_File(header, body)
 
+    @classmethod
+    def from_filepath(cls, filepath: str):
+        with open(filepath, "r") as file:
+            file_list = list(file)
+            header = GTF_File_Header(
+                description=file_list[0][2:-1],
+                provider=file_list[1][2:-1],
+                contact=file_list[2][2:-1],
+                format=file_list[3][2:-1],
+                date=file_list[4][2:-1],
+            )
+            body = file_list[5:]
+        return cls(header=header, body=body)
+
     def print_to_file(self, filename: str):
         if filename == None:
             filename = "concatenated.gtf"
@@ -40,21 +54,8 @@ class GTF_File:
             for line in self.body:
                 file.write(f"{line}")
 
-def filepath_to_gtf_file(filepath: str) -> GTF_File:
-    with open(filepath, "r") as file:
-        file_list = list(file)
-        header = GTF_File_Header(
-            description=file_list[0][2:-1],
-            provider=file_list[1][2:-1],
-            contact=file_list[2][2:-1],
-            format=file_list[3][2:-1],
-            date=file_list[4][2:-1],
-        )
-        body = file_list[5:]
-        return GTF_File(header=header, body=body)
-
 def main(args):
-    gtf_files = list(map(filepath_to_gtf_file, args.filepaths))
+    gtf_files = list(map(GTF_File.from_filepath, args.filepaths))
     output_file = reduce(lambda a, b: a + b, gtf_files)
     output_file.print_to_file(filename=args.output)
 
