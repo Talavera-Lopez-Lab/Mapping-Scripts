@@ -30,7 +30,9 @@ class GTF_File:
         body = self.body + other.body
         return GTF_File(header, body)
 
-    def print_to_file(self, filename: str="concatenated.gtf"):
+    def print_to_file(self, filename: str):
+        if filename == None:
+            filename = "concatenated.gtf"
         with open(filename, 'w') as file:
             for field in fields(self.header):
                 value = getattr(self.header, field.name)
