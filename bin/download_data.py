@@ -28,22 +28,29 @@ def setup_logging(log_file: Optional[str] = None):
 
 def sanitize_url(url: str) -> str:
     """Sanitize URL by encoding special characters."""
-    # Split URL into parts
     if '://' in url:
         protocol, path = url.split('://', 1)
     else:
         protocol, path = 'ftp', url
     
-    # Encode the path part while preserving slashes
     parts = path.split('/')
     encoded_parts = [quote(part) for part in parts]
     encoded_path = '/'.join(encoded_parts)
     
     return f"{protocol}://{encoded_path}"
 
+def check_file_exists(file_path: Path) -> bool:
+    """Check if file exists and has non-zero size."""
+    return file_path.exists() and file_path.stat().st_size > 0
+
 def download_file(url: str, output_path: Path, connections: int = 4) -> bool:
     """Download a file using axel with multiple connections."""
     try:
+        # Check if file already exists
+        if check_file_exists(output_path):
+            logging.info(f"File already exists and is complete: {output_path}")
+            return True
+
         # Sanitize URL
         sanitized_url = sanitize_url(url)
         
@@ -63,14 +70,14 @@ axel -n {connections} -o "{output_path}" "{sanitized_url}"
             check=True,
             capture_output=True,
             text=True,
-            encoding='latin-1'  # Use latin-1 encoding to handle binary output
+            encoding='latin-1'
         )
         
         # Clean up script
         script_path.unlink()
         
         # Verify file exists and has size > 0
-        if output_path.exists() and output_path.stat().st_size > 0:
+        if check_file_exists(output_path):
             return True
         else:
             logging.error(f"Download completed but file is empty or missing: {output_path}")
@@ -87,7 +94,6 @@ def process_metadata(metadata_df: pd.DataFrame) -> Dict[str, List[str]]:
     """Process metadata to get all FASTQ URIs for each sample."""
     sample_urls = {}
     
-    # Handle multiple FASTQ_URI columns if they exist
     fastq_columns = [col for col in metadata_df.columns if 'FASTQ_URI' in col]
     if not fastq_columns:
         fastq_columns = ['Comment[FASTQ_URI]']
@@ -102,8 +108,8 @@ def process_metadata(metadata_df: pd.DataFrame) -> Dict[str, List[str]]:
         urls = []
         for col in fastq_columns:
             if pd.notna(row.get(col)):
-                url = row[col].strip()  # Remove any whitespace
-                if url:  # Only add non-empty URLs
+                url = row[col].strip()
+                if url:
                     urls.append(url)
         
         if urls:
@@ -122,19 +128,21 @@ def process_metadata(metadata_df: pd.DataFrame) -> Dict[str, List[str]]:
 @click.option('--retry-count', default=3, help='Number of download retries')
 def main(metadata: str, output_dir: str, connections: int, log_file: str, retry_count: int):
     """Download FastQ files from metadata file with multiple FASTQ URIs per sample."""
-    # Create output directory first
-    output_path = Path(output_dir)
+    # Convert output_dir to absolute path
+    output_path = Path(output_dir).resolve()
+    # Remove extra 'fastq' directory from path if it exists
+    if output_path.name == 'fastq':
+        output_path = output_path.parent
+    
+    # Create output directory
     output_path.mkdir(parents=True, exist_ok=True)
     
-    # Setup logging after creating directory
+    # Setup logging
     setup_logging(log_file)
     
     try:
-        # Read metadata
         logging.info(f"Reading metadata from {metadata}")
         data = pd.read_csv(metadata, sep='\t')
-        
-        # Log metadata structure
         logging.info(f"Metadata columns: {data.columns.tolist()}")
         
         # Create download report file
@@ -159,16 +167,24 @@ def main(metadata: str, output_dir: str, connections: int, log_file: str, retry_
                 filename = url.split('/')[-1]
                 file_path = output_path / filename
                 
-                logging.info(f"Downloading {filename} ({current_file}/{total_files})")
+                logging.info(f"Processing {filename} ({current_file}/{total_files})")
                 
-                # Try multiple times
-                success = False
-                for attempt in range(retry_count):
-                    if attempt > 0:
-                        logging.info(f"Retry attempt {attempt + 1} for {filename}")
-                    success = download_file(url, file_path, connections)
-                    if success:
-                        break
+                # Check if file already exists
+                if check_file_exists(file_path):
+                    logging.info(f"File already exists, skipping: {file_path}")
+                    success = True
+                    attempts = 0
+                else:
+                    # Try multiple times
+                    success = False
+                    attempts = 0
+                    for attempt in range(retry_count):
+                        attempts = attempt + 1
+                        if attempt > 0:
+                            logging.info(f"Retry attempt {attempt + 1} for {filename}")
+                        success = download_file(url, file_path, connections)
+                        if success:
+                            break
                 
                 # Record result
                 download_results.append({
@@ -177,7 +193,7 @@ def main(metadata: str, output_dir: str, connections: int, log_file: str, retry_
                     'url': url,
                     'success': success,
                     'file_path': str(file_path),
-                    'attempts': attempt + 1
+                    'attempts': attempts
                 })
         
         # Save download report
@@ -186,7 +202,7 @@ def main(metadata: str, output_dir: str, connections: int, log_file: str, retry_
         # Summary
         successful = sum(1 for result in download_results if result['success'])
         logging.info(f"Download process completed. "
-                    f"Successfully downloaded {successful}/{total_files} files.")
+                    f"Successfully downloaded/verified {successful}/{total_files} files.")
         
         if successful == 0:
             raise RuntimeError("No files were downloaded successfully")

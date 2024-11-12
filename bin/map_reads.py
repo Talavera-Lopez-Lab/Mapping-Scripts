@@ -26,38 +26,36 @@ def setup_logging(log_file: Optional[str] = None):
     else:
         logging.basicConfig(level=logging.INFO, format=log_format)
 
-def get_fastq_files(fastq_dir: str, metadata_row: pd.Series) -> Tuple[str, str]:
+def get_fastq_files(fastq_dir: str, assay_name: str) -> Tuple[str, str]:
     """
-    Get R1 and R2 fastq files from metadata row.
+    Get R1 and R2 fastq files based on Assay Name.
     
     Args:
         fastq_dir: Directory containing FASTQ files
-        metadata_row: Row from metadata DataFrame containing file information
+        assay_name: Assay Name from metadata
     
     Returns:
         Tuple of (R1 path, R2 path)
     """
     fastq_dir = Path(fastq_dir)
     
-    # Get filenames from metadata
-    r1_file = metadata_row.get('Comment[read1 file]')
-    r2_file = metadata_row.get('Comment[read2 file]')
+    # Look for files matching the pattern
+    r1_pattern = f"{assay_name}_*R1*_001.fastq.gz"
+    r2_pattern = f"{assay_name}_*R2*_001.fastq.gz"
     
-    if pd.isna(r1_file) or pd.isna(r2_file):
-        raise ValueError(f"Missing read1 or read2 file information in metadata: {metadata_row.name}")
+    r1_files = list(fastq_dir.glob(r1_pattern))
+    r2_files = list(fastq_dir.glob(r2_pattern))
     
-    r1_path = fastq_dir / r1_file
-    r2_path = fastq_dir / r2_file
+    if not r1_files:
+        raise FileNotFoundError(f"R1 file not found for pattern: {r1_pattern}")
+    if not r2_files:
+        raise FileNotFoundError(f"R2 file not found for pattern: {r2_pattern}")
     
-    if not r1_path.exists():
-        raise FileNotFoundError(f"R1 file not found: {r1_path}")
-    if not r2_path.exists():
-        raise FileNotFoundError(f"R2 file not found: {r2_path}")
+    # Use the first matching file if multiple matches found
+    r1_path = r1_files[0]
+    r2_path = r2_files[0]
     
     return str(r1_path), str(r2_path)
-
-#!/usr/bin/env python3
-# (Previous imports remain the same)
 
 def detect_parameters(r1_file: str, r2_file: str, whitelist_dir: str) -> dict:
     """Detect correct parameters for STAR mapping based on sample data."""
@@ -94,8 +92,8 @@ def detect_parameters(r1_file: str, r2_file: str, whitelist_dir: str) -> dict:
         
         # Check whitelist matches
         for wl_file in whitelists:
-            wl_path = os.path.join(whitelist_dir, wl_file)  # Using os.path.join instead of /
-            if os.path.exists(wl_path):
+            wl_path = Path(whitelist_dir) / wl_file
+            if wl_path.exists():
                 with open(wl_path) as f:
                     whitelist = set(line.strip() for line in f)
                 with open(test_r1) as f:
@@ -106,18 +104,14 @@ def detect_parameters(r1_file: str, r2_file: str, whitelist_dir: str) -> dict:
         best_whitelist = max(whitelists.items(), key=lambda x: x[1])
         logging.info(f"Whitelist matches: {whitelists}")
         
-        # Set parameters based on whitelist using os.path.join for path construction
+        # Set parameters based on whitelist
         params = {
-            "whitelist": os.path.join(whitelist_dir, best_whitelist[0]),  # Using os.path.join
+            "whitelist": str(Path(whitelist_dir) / best_whitelist[0]),
             "cb_len": 16 if "3M" in best_whitelist[0] or "737K-august-2016" in best_whitelist[0] else 14,
             "umi_len": 12 if "3M" in best_whitelist[0] else 10,
-            "strand": "Forward",  # Default
+            "strand": "Forward",
             "barcodeReadLength": 0 if not r1_uniform else None
         }
-        
-        # Verify whitelist file exists
-        if not os.path.exists(params["whitelist"]):
-            raise FileNotFoundError(f"Whitelist file not found: {params['whitelist']}")
         
         logging.info(f"Detected parameters: {params}")
         return params
@@ -137,16 +131,14 @@ def run_star_mapping(fastq_r1: str, fastq_r2: str, output_dir: str, params: dict
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     
-    # Verify all input files exist
-    for filepath in [fastq_r1, fastq_r2, params['whitelist'], index_dir]:
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"Required file not found: {filepath}")
+    # Ensure output_path ends with a separator
+    output_prefix = str(output_path) + os.sep
     
     command = [
         "STAR",
         "--runThreadN", str(threads),
         "--genomeDir", index_dir,
-        "--readFilesIn", fastq_r2, fastq_r1,  # Note the order: R2 then R1
+        "--readFilesIn", fastq_r2, fastq_r1,
         "--runDirPerm", "All_RWX",
         "--soloCBwhitelist", params['whitelist'],
         "--soloType", "CB_UMI_Simple",
@@ -162,21 +154,24 @@ def run_star_mapping(fastq_r1: str, fastq_r2: str, output_dir: str, params: dict
         "--outFilterScoreMin", "30",
         "--soloFeatures", "Gene", "GeneFull", "Velocyto",
         "--readFilesCommand", "zcat",
-        "--soloOutFileNames", "output/", "features.tsv", "barcodes.tsv", "matrix.mtx"
+        "--soloOutFileNames", "output/", "features.tsv", "barcodes.tsv", "matrix.mtx",
+        "--outFileNamePrefix", output_prefix
     ]
     
     if params.get('barcodeReadLength') is not None:
         command.extend(["--soloBarcodeReadLength", "0"])
     
-    command.extend(["--outFileNamePrefix", str(output_path / "mapping_")])
-    
-    # Log the exact command for debugging
-    logging.info("STAR command:")
+    logging.info(f"Running STAR command in directory: {output_path}")
     logging.info(" ".join(command))
     
-    # Run STAR
     try:
         subprocess.run(command, check=True, capture_output=True, text=True)
+        
+        # Verify output directory exists
+        output_dir_path = output_path / "output"
+        if not output_dir_path.exists():
+            raise RuntimeError(f"STAR completed but output directory not found: {output_dir_path}")
+            
     except subprocess.CalledProcessError as e:
         logging.error(f"STAR mapping failed with error:")
         logging.error(f"stdout: {e.stdout}")
@@ -201,37 +196,32 @@ def main(fastq_dir: str, output_dir: str, index_dir: str, whitelist_dir: str,
         metadata_df = pd.read_csv(metadata, sep="\t")
         logging.info(f"Metadata columns: {metadata_df.columns.tolist()}")
         
-        # Group by sample name if needed
-        if 'Extract Name' in metadata_df.columns:
-            sample_groups = metadata_df.groupby('Extract Name')
-        else:
-            # If no Extract Name, treat each row as a separate sample
-            metadata_df['_sample_id'] = [f"sample_{i}" for i in range(len(metadata_df))]
-            sample_groups = metadata_df.groupby('_sample_id')
+        if 'Assay Name' not in metadata_df.columns:
+            raise ValueError("Metadata must contain 'Assay Name' column")
         
-        for sample_name, sample_data in sample_groups:
+        # Process each unique Assay Name
+        for assay_name in metadata_df['Assay Name'].unique():
             try:
-                logging.info(f"Processing sample: {sample_name}")
+                logging.info(f"Processing sample: {assay_name}")
                 
-                # Use first row for this sample
-                sample_row = sample_data.iloc[0]
+                # Create output directory structure
+                sample_output_dir = Path(output_dir) / "StarMapped" / assay_name
                 
-                # Get fastq files from metadata
-                r1_file, r2_file = get_fastq_files(fastq_dir, sample_row)
+                # Get fastq files using Assay Name pattern
+                r1_file, r2_file = get_fastq_files(fastq_dir, assay_name)
                 logging.info(f"Found FASTQ files: R1={r1_file}, R2={r2_file}")
                 
                 # Detect parameters
                 params = detect_parameters(r1_file, r2_file, whitelist_dir)
-                logging.info(f"Detected parameters for {sample_name}: {params}")
+                logging.info(f"Detected parameters for {assay_name}: {params}")
                 
                 # Run mapping
-                sample_output_dir = os.path.join(output_dir, sample_name)
                 run_star_mapping(r1_file, r2_file, sample_output_dir, params, index_dir, threads)
                 
-                logging.info(f"Successfully processed {sample_name}")
+                logging.info(f"Successfully processed {assay_name}")
                 
             except Exception as e:
-                logging.error(f"Error processing {sample_name}: {str(e)}")
+                logging.error(f"Error processing {assay_name}: {str(e)}")
                 raise
             
     except Exception as e:

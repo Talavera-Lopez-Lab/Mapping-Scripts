@@ -1,5 +1,5 @@
 process MAP_READS {
-    publishDir "${params.outdir}/mapped", mode: 'copy'
+    publishDir "${params.outdir}", mode: 'copy'
     
     cpus 32
     memory { 64.GB * task.attempt }
@@ -12,18 +12,18 @@ process MAP_READS {
     tuple val(sample_id), path(fastq_files), path(metadata)
     
     output:
-    tuple val(sample_id), path("${sample_id}/output"), emit: mapped_data
-    path "${sample_id}/mapping.log", emit: logs
+    tuple val(sample_id), path("StarMapped/${sample_id}/output"), emit: mapped_data
+    path "StarMapped/${sample_id}/**", emit: all_outputs
     
     script:
     """
     python ${projectDir}/bin/map_reads.py \
         --fastq-dir . \
-        --output-dir ${sample_id} \
+        --output-dir . \
         --index-dir ${params.index_dir} \
         --whitelist-dir ${params.whitelist_dir} \
         --metadata ${metadata} \
         --threads ${task.cpus} \
-        --log-file ${sample_id}/mapping.log
+        --log-file mapping.log
     """
 }

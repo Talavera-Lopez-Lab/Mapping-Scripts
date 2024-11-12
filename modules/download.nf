@@ -1,29 +1,20 @@
 process DOWNLOAD_DATA {
-    publishDir "${params.outdir}/fastq", mode: 'copy'
-    
-    cpus 4
-    memory { 8.GB * task.attempt }
-    time { 24.hour * task.attempt }
-    
-    errorStrategy { task.attempt <= 3 ? 'retry' : 'finish' }
-    maxRetries 3
+    publishDir "/mnt/LaCIE/annaM/gut_project/raw_fastq_files/Yu_2021/results/fastq", mode: 'copy'
     
     input:
     path metadata
     
     output:
-    path "fastq/*.fastq.gz", emit: fastq_files
-    path "fastq/download_report.csv", emit: report
-    path "fastq/download.log", emit: log
+    path "*.fastq.gz", emit: fastq_files
+    path "download_report.csv", emit: report
+    path "download.log", emit: log
     
     script:
     """
-    mkdir -p fastq
-    
     python ${projectDir}/bin/download_data.py \
         --metadata ${metadata} \
-        --output-dir fastq \
+        --output-dir \$PWD \
         --connections ${task.cpus} \
-        --log-file fastq/download.log
+        --log-file download.log
     """
 }
