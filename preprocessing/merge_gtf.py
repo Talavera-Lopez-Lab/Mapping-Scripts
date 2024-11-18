@@ -27,7 +27,7 @@ class GTF_File:
 
     def __add__(self, other):
         header = self.header + other.header
-        body = self.body + other.body
+        body = list(set(self.body) | set(other.body))
         return GTF_File(header, body)
 
     @classmethod
@@ -61,7 +61,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("filepaths", nargs="+", help="Files to be concatenated")
+    parser.add_argument("--filepaths", nargs="+", help="Files to be concatenated")
     parser.add_argument("-o", "--output", help="Name of the output file")
     args = parser.parse_args()
     main(args)
